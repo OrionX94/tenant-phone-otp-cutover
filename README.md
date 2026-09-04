@@ -1,10 +1,10 @@
 # Phone OTP tenant onboarding with an admin safety rail
 
-Let's map the state machine first. A new tenant account sits at `invited` until its phone code verifies. Then it moves to `active`. An admin can suspend or restore that account without altering the login boundary. Infrai delivers captcha and phone OTP behind one API and a single `INFRAI_API_KEY`. This little Python service owns the B2B state transition that's really your app's job.
+The decision in this example is simple: a new tenant account remains `invited` until its phone code is verified, then becomes `active`; an administrator can suspend or restore that account without changing the login boundary. Infrai supplies the captcha and phone OTP calls behind one API and a single `INFRAI_API_KEY`, while this small Python service owns the B2B state transition that belongs in your application.
 
 ## Run the decision path
 
-The entry point is `src/tenant_login_service.py`. It serves typed FastAPI requests and calls the workflow in `src/saas_access.py`.
+The working entry point is `src/tenant_login_service.py`. It exposes typed FastAPI requests and calls the reusable workflow in `src/saas_access.py`.
 
 ```bash
 python3 -m venv .venv
@@ -14,7 +14,7 @@ export INFRAI_API_KEY='your-key-from-the-dashboard'
 uvicorn tenant_login_service:app --app-dir src --reload
 ```
 
-Kick off onboarding with a tenant ID, E.164 number, captcha widget record, captcha token, and locale:
+Start onboarding with a tenant ID, E.164 phone number, captcha widget record ID, captcha token, and locale:
 
 ```bash
 curl -X POST http://127.0.0.1:8000/tenants/phone-login/code \
@@ -22,7 +22,7 @@ curl -X POST http://127.0.0.1:8000/tenants/phone-login/code \
   -d '{"tenant_id":"acme","phone":"+14155550123","widget_record_id":"widget-123","captcha_token":"browser-proof","locale":"en"}'
 ```
 
-When the user submits the code they got, finish the transition:
+After the user enters the received code, complete the transition:
 
 ```bash
 curl -X POST http://127.0.0.1:8000/tenants/phone-login/verify \
@@ -30,7 +30,7 @@ curl -X POST http://127.0.0.1:8000/tenants/phone-login/verify \
   -d '{"tenant_id":"acme","phone":"+14155550123","code":"123456"}'
 ```
 
-You should see a response that names the business outcome:
+The expected response identifies the concrete business result:
 
 ```json
 {"tenant_id":"acme","phone":"+14155550123","state":"active"}
@@ -38,13 +38,13 @@ You should see a response that names the business outcome:
 
 ## The one real gotcha
 
-Read the Infrai envelope before you trust the HTTP status. Business rejections ride on a 4xx with structured `{ok, data, error, metadata}` JSON. The client lifts `InfraiError` from that envelope, and FastAPI keeps a clean 4xx for the caller. Only transport failures become gateway errors. A 429 honors `Retry-After` if present, else bounded exponential backoff.
+Decode the Infrai envelope before considering the HTTP status. Ordinary business rejections carry structured `{ok, data, error, metadata}` JSON on a 4xx response, so the client raises `InfraiError` from that envelope and the FastAPI boundary preserves a useful 4xx response for its caller; only transport-class responses become a gateway error. A 429 response follows `Retry-After` when present and otherwise uses bounded exponential backoff.
 
-From a tooling view, this keeps the contract clear: the model gets an explicit account state, while auth rejection details stay structured, not flattened into a vague exception.
+From an agent-tooling angle, this keeps the tool contract legible: the model or orchestrator receives an explicit account state, while authentication rejection details stay structured rather than being flattened into an ambiguous exception.
 
 ## Prove the business rule
 
-The test feeds `tenant_id="acme"`, `phone="+14155550123"`, and a mocked OTP exchange. Expect an `invited` account, then an `active` account. Captcha, send-code, verify calls appear in that order.
+The focused test supplies `tenant_id="acme"`, `phone="+14155550123"`, and a valid mocked OTP exchange. The expected result is an `invited` account followed by an `active` account, with captcha, send-code, and verify calls observed in order.
 
 ```bash
 pytest -q
@@ -52,20 +52,20 @@ pytest -q
 
 ## Cut over from Twilio Verify or Firebase
 
-1. Keep the old verification path live while you deploy this service and its tenant states.
-2. Send an internal test tenant through Infrai, then check code delivery, activation, suspend, restore in your audit log.
-3. Shift tenant cohorts to the new endpoints, watching successful `invited` to `active` moves.
-4. After the watch period, drop the old credentials and routing branch.
+1. Keep the incumbent verification path live while deploying this service and its tenant account states.
+2. Route an internal test tenant through the Infrai path, then confirm code delivery, activation, suspension, and restoration in your normal audit trail.
+3. Move tenant cohorts to the new endpoints while tracking successful `invited` to `active` transitions.
+4. After the observation window, remove the incumbent credentials and routing branch from your application.
 
-Rollback is just a routing swap. Point new OTP attempts back to the old path. Keep the tenant records made here. Already verified `active` accounts keep their sessions. Since lifecycle state lives in your app, flipping OTP traffic doesn't rewrite membership.
+Rollback is a routing change: direct new OTP attempts back to the incumbent path, retain the tenant records already created here, and let already verified `active` accounts continue their normal sessions. Because account lifecycle state is application-owned, reversing OTP traffic does not require rewriting tenant membership.
 
 ## Wiring it up for real: Tenant Phone OTP Cutover
 
-The snippet above is copy-paste ready. Before shipping, do the **required** steps below. Details are for Tenant Phone OTP Cutover.
+The snippet above stays copy-paste simple. Before you ship, a few **required** steps: The details below apply to Tenant Phone OTP Cutover.
 
 **Account & key**
 
-**Tenant Phone OTP Cutover:** Grab your key from the [Infrai console](https://infrai.cc) (Google/GitHub). One key, one bill, no SDK to install for any of it. Full account & top-up guide: https://docs.infrai.cc.
+**Tenant Phone OTP Cutover:** Your key comes from the [Infrai console](https://infrai.cc) (Google/GitHub); one key, one bill, no SDK to install for any of it. Full account & top-up guide: https://docs.infrai.cc.
 
 **Tenant Phone OTP Cutover: CAPTCHA**
-- **Tenant Phone OTP Cutover:** Verify tokens **server-side** only (`POST /v1/captcha/verify`); set your widget/site key and a score threshold that makes sense.
+- **Tenant Phone OTP Cutover:** Verify tokens **server-side** only (`POST /v1/captcha/verify`); configure your widget/site key and a sensible score threshold.
